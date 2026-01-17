@@ -1478,6 +1478,273 @@ class OnDemandJargonTranslator:
         return insights
 
 
+class OnDemandTopColumnsAnalyzer:
+    """On-Demand Top Columns Analyzer - Identifies most important/impactful columns"""
+    
+    def __init__(self, api_key, workflow_id):
+        self.api_key = api_key
+        self.workflow_id = workflow_id
+        self.base_url = "https://api.on-demand.io/automation/api/workflow"
+        self.endpoint = f"{self.base_url}/{workflow_id}/execute"
+    
+    @staticmethod
+    def _make_json_serializable(obj):
+        """Convert non-JSON-serializable values to JSON-compatible format"""
+        if isinstance(obj, dict):
+            return {k: OnDemandTopColumnsAnalyzer._make_json_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [OnDemandTopColumnsAnalyzer._make_json_serializable(item) for item in obj]
+        elif pd.isna(obj) or (isinstance(obj, float) and np.isinf(obj)):
+            return None
+        elif isinstance(obj, (np.integer, np.floating)):
+            return float(obj) if isinstance(obj, np.floating) else int(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return obj
+    
+    def analyze_top_columns(self, df, filename):
+        """Analyze and rank columns by importance/impact"""
+        try:
+            headers = {"apikey": self.api_key}
+            
+            # Prepare comprehensive data payload
+            sample_data = df.head(10).to_dict(orient='records')
+            sample_data = self._make_json_serializable(sample_data)
+            
+            # Calculate column statistics for ranking
+            column_stats = {}
+            for col in df.columns:
+                stats = {
+                    "dtype": str(df[col].dtype),
+                    "missing_count": int(df[col].isnull().sum()),
+                    "missing_percentage": float((df[col].isnull().sum() / len(df)) * 100),
+                    "unique_count": int(df[col].nunique()),
+                    "memory_usage": int(df[col].memory_usage(deep=True))
+                }
+                
+                if df[col].dtype in ['int64', 'float64']:
+                    stats["mean"] = float(df[col].mean()) if not df[col].isna().all() else None
+                    stats["std"] = float(df[col].std()) if not df[col].isna().all() else None
+                    stats["min"] = float(df[col].min()) if not df[col].isna().all() else None
+                    stats["max"] = float(df[col].max()) if not df[col].isna().all() else None
+                    stats["median"] = float(df[col].median()) if not df[col].isna().all() else None
+                
+                column_stats[col] = stats
+            
+            payload = {
+                "dataset": {
+                    "filename": filename,
+                    "shape": list(df.shape),
+                    "columns": list(df.columns),
+                    "column_stats": column_stats,
+                    "dtypes": {col: str(dtype) for col, dtype in df.dtypes.items()},
+                    "numeric_columns": df.select_dtypes(include=[np.number]).columns.tolist(),
+                    "categorical_columns": df.select_dtypes(include=['object']).columns.tolist(),
+                    "sample_data": sample_data,
+                    "total_missing": int(df.isnull().sum().sum()),
+                    "duplicates": len(df[df.duplicated()])
+                }
+            }
+            
+            # Initial API call
+            with requests.post(self.endpoint, json=payload, headers=headers, timeout=30) as response:
+                if response.status_code == 200:
+                    result = response.json()
+                    
+                    # Check if this is async response with executionID
+                    execution_id = result.get("executionID")
+                    if execution_id:
+                        logger.info(f"Async execution started: {execution_id}")
+                        return self._fetch_execution_results(execution_id, headers, df)
+                    
+                    # Extract top columns data
+                    top_columns = result.get("top_columns") or result.get("important_columns") or []
+                    column_ranking = result.get("column_ranking") or result.get("rankings") or {}
+                    recommendations = result.get("recommendations") or result.get("insights") or []
+                    
+                    # If we got valid data, return it
+                    if top_columns or column_ranking or recommendations:
+                        return {
+                            "success": True,
+                            "top_columns": top_columns if isinstance(top_columns, list) else [str(top_columns)],
+                            "column_ranking": column_ranking if isinstance(column_ranking, dict) else {},
+                            "recommendations": recommendations if isinstance(recommendations, list) else [str(recommendations)],
+                            "timestamp": datetime.now().isoformat(),
+                            "source": "on-demand"
+                        }
+                    else:
+                        # Empty response - return success with default analysis
+                        return {
+                            "success": True,
+                            "top_columns": self._generate_default_top_columns(df),
+                            "column_ranking": self._generate_default_ranking(df),
+                            "recommendations": self._generate_default_recommendations(df),
+                            "timestamp": datetime.now().isoformat(),
+                            "source": "fallback"
+                        }
+                else:
+                    return {
+                        "success": False,
+                        "error": f"API returned {response.status_code}",
+                        "message": "Could not analyze top columns"
+                    }
+        except Exception as e:
+            logger.error(f"On-Demand Top Columns Analyzer error: {e}")
+            return {"success": False, "error": str(e), "message": "Top columns analysis failed"}
+    
+    def _fetch_execution_results(self, execution_id, headers, df, max_retries=5):
+        """Fetch results from async execution"""
+        result_endpoint = f"{self.base_url}/{execution_id}/result"
+        
+        for attempt in range(max_retries):
+            try:
+                with requests.get(result_endpoint, headers=headers, timeout=10) as response:
+                    if response.status_code == 200:
+                        result = response.json()
+                        
+                        # Extract data from result
+                        top_columns = result.get("top_columns") or result.get("important_columns") or []
+                        column_ranking = result.get("column_ranking") or result.get("rankings") or {}
+                        recommendations = result.get("recommendations") or result.get("insights") or []
+                        
+                        if top_columns or column_ranking or recommendations:
+                            return {
+                                "success": True,
+                                "top_columns": top_columns if isinstance(top_columns, list) else [str(top_columns)],
+                                "column_ranking": column_ranking if isinstance(column_ranking, dict) else {},
+                                "recommendations": recommendations if isinstance(recommendations, list) else [str(recommendations)],
+                                "timestamp": datetime.now().isoformat(),
+                                "source": "on-demand"
+                            }
+                    elif response.status_code == 202:
+                        time.sleep(1)
+                        continue
+                    elif response.status_code == 404:
+                        time.sleep(1)
+                        continue
+            except Exception as e:
+                logger.debug(f"Fetch attempt {attempt + 1} failed: {e}")
+                time.sleep(1)
+        
+        # If we couldn't get results, return fallback
+        return {
+            "success": True,
+            "top_columns": self._generate_default_top_columns(df),
+            "column_ranking": self._generate_default_ranking(df),
+            "recommendations": self._generate_default_recommendations(df),
+            "timestamp": datetime.now().isoformat(),
+            "source": "fallback"
+        }
+    
+    @staticmethod
+    def _generate_default_top_columns(df):
+        """Generate default top columns based on data quality and variance"""
+        # Score columns by importance
+        scores = {}
+        
+        for col in df.columns:
+            score = 0
+            
+            # Low missing values = important
+            missing_pct = (df[col].isnull().sum() / len(df)) * 100
+            score += max(0, 100 - missing_pct)
+            
+            # Higher variance/uniqueness = important (for numeric/categorical)
+            if df[col].dtype in ['int64', 'float64']:
+                variance = df[col].var()
+                score += min(50, variance / df[col].std() if df[col].std() > 0 else 0)
+            else:
+                unique_ratio = (df[col].nunique() / len(df)) * 100
+                score += min(50, unique_ratio)
+            
+            # Less duplicates = important
+            duplicates = len(df[df.duplicated(subset=[col])])
+            score += max(0, 20 - (duplicates / len(df)) * 100)
+            
+            scores[col] = score
+        
+        # Sort by score
+        sorted_cols = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        return [col for col, score in sorted_cols[:max(1, len(df.columns) // 3)]]
+    
+    @staticmethod
+    def _generate_default_ranking(df):
+        """Generate default column ranking with scores"""
+        ranking = {}
+        
+        for col in df.columns:
+            score = 0
+            details = []
+            
+            # Data quality score
+            missing_pct = (df[col].isnull().sum() / len(df)) * 100
+            quality_score = 100 - missing_pct
+            score += quality_score * 0.3
+            if quality_score == 100:
+                details.append("✓ No missing values")
+            elif quality_score > 90:
+                details.append("✓ High data quality")
+            
+            # Variance score
+            if df[col].dtype in ['int64', 'float64']:
+                variance = df[col].var()
+                variance_score = min(100, (variance / (df[col].std() + 1e-6)) * 10)
+                score += variance_score * 0.3
+                details.append(f"Variance: {variance:.2f}")
+            else:
+                unique_pct = (df[col].nunique() / len(df)) * 100
+                score += unique_pct * 0.3
+                details.append(f"Unique: {unique_pct:.1f}%")
+            
+            # Cardinality score
+            unique_count = df[col].nunique()
+            if unique_count < 10:
+                details.append("Low cardinality")
+            elif unique_count > len(df) * 0.8:
+                details.append("Very high cardinality")
+            
+            ranking[col] = {
+                "importance_score": min(100, score),
+                "details": details
+            }
+        
+        return ranking
+    
+    @staticmethod
+    def _generate_default_recommendations(df):
+        """Generate default recommendations based on columns"""
+        recommendations = []
+        
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        categorical_cols = df.select_dtypes(include=['object']).columns
+        
+        if len(numeric_cols) > 0:
+            recommendations.append(f"Focus on {len(numeric_cols)} numeric features for correlation analysis")
+        
+        if len(categorical_cols) > 0:
+            recommendations.append(f"Encode {len(categorical_cols)} categorical features for modeling")
+        
+        # Check for low-variance columns
+        for col in numeric_cols:
+            if df[col].std() < 0.1:
+                recommendations.append(f"Consider dropping '{col}' - very low variance")
+        
+        # Check for high cardinality
+        for col in categorical_cols:
+            if df[col].nunique() > 50:
+                recommendations.append(f"'{col}' has high cardinality ({df[col].nunique()} unique values) - may need grouping")
+        
+        # Check for constant columns
+        for col in df.columns:
+            if df[col].nunique() == 1:
+                recommendations.append(f"Drop '{col}' - only has one unique value (no variance)")
+        
+        if not recommendations:
+            recommendations.append("Dataset appears well-balanced with good feature diversity")
+        
+        return recommendations
+
+
 class OnDemandReversibilityChecker:
     """On-Demand Reversibility Checker - Identifies which transformations are reversible"""
     
@@ -1680,17 +1947,20 @@ class DataEngineeringSystem:
         self.ondemand_summarizer = None
         self.ondemand_jargon_translator = None
         self.ondemand_reversibility = None
+        self.ondemand_top_columns = None
         if self.ondemand_api_key:
             architecture_workflow = os.getenv("ONDEMAND_ARCHITECTURE_WORKFLOW")
             visualizer_workflow = os.getenv("ONDEMAND_VISUALIZER_WORKFLOW")
             summarizer_workflow = os.getenv("ONDEMAND_SUMMARIZER_WORKFLOW")
             jargon_translator_workflow = os.getenv("ONDEMAND_JARGON_TRANSLATOR_WORKFLOW")
             reversibility_workflow = os.getenv("ONDEMAND_REVERSIBILITY_WORKFLOW")
+            top_columns_workflow = os.getenv("ONDEMAND_TOP_COLUMNS_WORKFLOW", architecture_workflow)  # Use top columns workflow if available
             self.ondemand_architecture = OnDemandArchitecture(self.ondemand_api_key, architecture_workflow)
             self.ondemand_visualizer = OnDemandVisualizer(self.ondemand_api_key, visualizer_workflow)
             self.ondemand_summarizer = OnDemandSummarizer(self.ondemand_api_key, summarizer_workflow)
             self.ondemand_jargon_translator = OnDemandJargonTranslator(self.ondemand_api_key, jargon_translator_workflow)
             self.ondemand_reversibility = OnDemandReversibilityChecker(self.ondemand_api_key, reversibility_workflow)
+            self.ondemand_top_columns = OnDemandTopColumnsAnalyzer(self.ondemand_api_key, top_columns_workflow)
         # Original configuration
         self.api_key = None
         self.base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
@@ -1819,8 +2089,9 @@ class DataEngineeringSystem:
                 ("9", "summarize", "Dataset Summary"),
                 ("10", "translate", "Jargon Translator"),
                 ("11", "reversibility", "Reversibility Checker"),
-                ("12", "help", "Help"),
-                ("13", "exit", "Exit"),
+                ("12", "topcolumns", "Top Columns Analyzer"),
+                ("13", "help", "Help"),
+                ("14", "exit", "Exit"),
             ]
             
             for num, cmd, desc in menu_options:
@@ -1838,7 +2109,7 @@ class DataEngineeringSystem:
             
             # Map number to command
             number_map = {"1": "load", "2": "analyze", "3": "run", "4": "preview", 
-                         "5": "save", "6": "auto", "7": "architecture", "8": "visualize", "9": "summarize", "10": "translate", "11": "reversibility", "12": "help", "13": "exit"}
+                         "5": "save", "6": "auto", "7": "architecture", "8": "visualize", "9": "summarize", "10": "translate", "11": "reversibility", "12": "topcolumns", "13": "help", "14": "exit"}
             if cmd in number_map:
                 cmd = number_map[cmd]
             
@@ -1901,6 +2172,12 @@ class DataEngineeringSystem:
             elif cmd == "reversibility":
                 if self.df is not None:
                     self.run_ondemand_reversibility()
+                else:
+                    console.print("[yellow]⚠ Load a dataset first[/yellow]")
+                    time.sleep(1)
+            elif cmd == "topcolumns":
+                if self.df is not None:
+                    self.run_top_columns_analyzer()
                 else:
                     console.print("[yellow]⚠ Load a dataset first[/yellow]")
                     time.sleep(1)
@@ -2260,6 +2537,87 @@ Model Interpretation: Critical for Debugging ✓
                 title="Reversibility Check",
                 border_style="cyan"
             ))
+        else:
+            console.print(f"[yellow]⚠ {result.get('message', result.get('error'))}[/yellow]")
+        
+        Prompt.ask("\nPress Enter to continue")
+    
+    def run_top_columns_analyzer(self):
+        """Run On-Demand Top Columns Analyzer - Identify most important columns"""
+        if not self.ondemand_top_columns:
+            console.print("[red]❌ On-Demand Top Columns Analyzer not configured[/red]")
+            Prompt.ask("Press Enter to continue")
+            return
+        
+        self.show_banner()
+        console.rule("[bold cyan]⭐ TOP COLUMNS ANALYZER - FEATURE IMPORTANCE RANKING[/bold cyan]")
+        
+        with console.status("[cyan]Analyzing top columns with On-Demand API...[/cyan]", spinner="dots"):
+            result = self.ondemand_top_columns.analyze_top_columns(self.df, self.filename)
+        
+        if result.get("success"):
+            console.print("\n[green]✓ Top Columns Analysis Complete[/green]")
+            
+            # Display top columns
+            top_cols = result.get("top_columns", [])
+            if top_cols:
+                console.print("\n[bold yellow]⭐ MOST IMPORTANT COLUMNS (By Impact):[/bold yellow]")
+                for i, col in enumerate(top_cols, 1):
+                    console.print(f"  {i}. {col}")
+            
+            # Display detailed ranking
+            ranking = result.get("column_ranking", {})
+            if ranking:
+                console.print("\n[bold cyan]COLUMN IMPORTANCE RANKING:[/bold cyan]")
+                
+                # Sort by importance score
+                sorted_ranking = sorted(ranking.items(), 
+                    key=lambda x: x[1].get("importance_score", 0) if isinstance(x[1], dict) else 0, 
+                    reverse=True)
+                
+                for col, info in sorted_ranking[:10]:  # Show top 10
+                    if isinstance(info, dict):
+                        score = info.get("importance_score", 0)
+                        details = info.get("details", [])
+                        bar_length = int(score / 10)
+                        bar = "█" * bar_length + "░" * (10 - bar_length)
+                        console.print(f"  {col:30} [{bar}] {score:.1f}%")
+                        if details:
+                            for detail in details[:2]:
+                                console.print(f"    └─ {detail}")
+            
+            # Display recommendations
+            recommendations = result.get("recommendations", [])
+            if recommendations:
+                console.print("\n[bold cyan]FEATURE ENGINEERING RECOMMENDATIONS:[/bold cyan]")
+                for i, rec in enumerate(recommendations, 1):
+                    console.print(f"  {i}. {rec}")
+            
+            # Create visual summary
+            console.print(Panel(
+                f"""[bold cyan]TOP COLUMNS SUMMARY[/bold cyan]
+File: {self.filename}
+Total Columns: {len(self.df.columns)}
+Top Columns Identified: {len(top_cols)}
+Analysis Source: {result.get('source', 'API')}
+
+[bold]Key Findings:[/bold]
+• Dataset contains {len(self.df)} rows
+• {len(self.df.select_dtypes(include=[np.number]).columns)} numeric features
+• {len(self.df.select_dtypes(include=['object']).columns)} categorical features
+• Total missing values: {int(self.df.isnull().sum().sum())}
+""",
+                title="Top Columns Analysis",
+                border_style="cyan"
+            ))
+            
+            # Option to focus on top columns
+            focus = questionary.confirm("\nCreate subset with top columns only?").ask()
+            if focus:
+                if top_cols:
+                    cols_to_keep = [col for col in top_cols if col in self.df.columns]
+                    self.df = self.df[cols_to_keep]
+                    console.print(f"[green]✔ Dataset focused to {len(cols_to_keep)} top columns[/green]")
         else:
             console.print(f"[yellow]⚠ {result.get('message', result.get('error'))}[/yellow]")
         

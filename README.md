@@ -1,6 +1,6 @@
 # AI Data Engineering System v5.0.0
 
-**Multi-Agent ML Data Preparation Platform with 5 On-Demand Workflow Agents**
+**Multi-Agent ML Data Preparation Platform with 🌟 6 On-Demand Workflow Agents**
 
 ---
 
@@ -8,19 +8,20 @@
 
 The **AI Data Engineering System** is a sophisticated Python CLI tool that orchestrates multiple specialized agents to prepare datasets for machine learning. It combines:
 - **OpenRouter LLM-based agents** (Architect, Engineer, Observer)
-- **5 On-Demand workflow agents** for specialized tasks
+- **🌟 6 On-Demand workflow agents** for specialized tasks
 - **Interactive menu interface** with human-in-the-loop control
 - **Multi-domain dataset support** with automatic strategy selection
 
 ### Key Features
 ✅ **Multi-Agent Architecture** - Coordinated data analysis and transformation  
-✅ **5 On-Demand Specialized Agents** - Architecture, Visualizer, Summarizer, Jargon Translator, Reversibility Checker  
+✅ **🌟 6 On-Demand Specialized Agents** - Architecture, Visualizer, Summarizer, Jargon Translator, Reversibility Checker, **Top Columns Analyzer**  
 ✅ **Async Polling** - Long-running API operations with automatic retry logic  
 ✅ **Domain Detection** - Auto-identifies dataset type (CENSUS, HEALTH, FINANCE, CUSTOMER, etc.)  
 ✅ **Smart Imputation** - Context-aware missing value handling  
 ✅ **Interactive Workflow** - Step-by-step human control over transformations  
 ✅ **Visual Analytics** - Matplotlib-based chart generation with insights  
 ✅ **Privacy-Aware** - PII detection and handling recommendations  
+✅ **⭐ Feature Selection** - Intelligent column importance ranking
 
 ---
 
@@ -31,16 +32,17 @@ The **AI Data Engineering System** is a sophisticated Python CLI tool that orche
 │            AI Data Engineering System                        │
 ├─────────────────────────────────────────────────────────────┤
 │                                                               │
-│  ┌──────────────────┐  ┌──────────────────┐                 │
-│  │   On-Demand      │  │   OpenRouter     │                 │
-│  │   Workflows      │  │   LLM Agents     │                 │
-│  ├──────────────────┤  ├──────────────────┤                 │
-│  │ 1. Architecture  │  │ • Architect      │                 │
-│  │ 2. Visualizer    │  │ • Engineer       │                 │
-│  │ 3. Summarizer    │  │ • Observer       │                 │
-│  │ 4. Translator    │  │                  │                 │
-│  │ 5. Reversibility │  │                  │                 │
-│  └──────────────────┘  └──────────────────┘                 │
+│  ┌──────────────────────┐  ┌──────────────────┐             │
+│  │  🌟 6 On-Demand      │  │   OpenRouter     │             │
+│  │     Workflows        │  │   LLM Agents     │             │
+│  ├──────────────────────┤  ├──────────────────┤             │
+│  │ 1. Architecture      │  │ • Architect      │             │
+│  │ 2. Visualizer        │  │ • Engineer       │             │
+│  │ 3. Summarizer        │  │ • Observer       │             │
+│  │ 4. Translator        │  │                  │             │
+│  │ 5. Reversibility     │  │                  │             │
+│  │ 6. ⭐ Top Columns    │  │                  │             │
+│  └──────────────────────┘  └──────────────────┘             │
 │         ▲                       ▲                             │
 │         │                       │                             │
 │         └───────────┬───────────┘                             │
@@ -108,6 +110,7 @@ ONDEMAND_VISUALIZER_WORKFLOW=696a8bcc27b1bb913e8989ac
 ONDEMAND_SUMMARIZER_WORKFLOW=696aa1148e6b21cb8aea53ef
 ONDEMAND_JARGON_TRANSLATOR_WORKFLOW=696aa42027b1bb913e898ee1
 ONDEMAND_REVERSIBILITY_WORKFLOW=696aab3c8e6b21cb8aea56b5
+ONDEMAND_TOP_COLUMNS_WORKFLOW=696aaa2827b1bb913e89910e
 
 # Optional Settings
 LOG_LEVEL=INFO
@@ -141,8 +144,9 @@ python cli.py
 | **9** | `summarize` | Dataset summary with statistics |
 | **10** | `translate` | Jargon Translator (business terminology) |
 | **11** | `reversibility` | Reversibility Checker (transformation impact analysis) |
-| **12** | `help` | Show help information |
-| **13** | `exit` | Exit application |
+| **12** | `topcolumns` | ⭐ **Top Columns Analyzer** (feature importance ranking) |
+| **13** | `help` | Show help information |
+| **14** | `exit` | Exit application |
 
 ### Example Workflow
 
@@ -175,7 +179,7 @@ python cli.py
 
 ## 🤖 Agent Specifications
 
-### On-Demand Agents (Async Workflow-Based)
+### 🌟 On-Demand Agents (Async Workflow-Based) - 6 AGENTS
 
 #### 1. **Architecture Analysis**
 - **Purpose**: Analyze dataset structure and design transformation architecture
@@ -205,12 +209,25 @@ python cli.py
 - **Output**: Business-friendly names, insights
 - **Use Case**: Executive communication and documentation
 
-#### 5. **Reversibility Checker** ⭐ NEW
+#### 5. **Reversibility Checker**
 - **Purpose**: Identify which transformations are reversible/irreversible
 - **Workflow ID**: `696aab3c8e6b21cb8aea56b5`
 - **Input**: Dataset structure, transformation history
 - **Output**: Reversible operations list, irreversible operations list, impact analysis
 - **Use Case**: Model interpretation, debugging, audit trails
+
+#### 6. **⭐ Top Columns Analyzer** (NEW!)
+- **Purpose**: Rank columns by importance/impact and identify key features
+- **Workflow ID**: `696aaa2827b1bb913e89910e`
+- **Input**: Dataset with column statistics (variance, nulls, cardinality)
+- **Output**: Top columns list, importance ranking (0-100%), feature recommendations
+- **Use Case**: Feature selection, dimensionality reduction, ML optimization
+- **Features**:
+  - ✨ Automatic column importance scoring
+  - 📊 Detailed ranking with visual progress bars
+  - 💡 Feature engineering recommendations
+  - 🎯 Optional: Create subset with top columns only
+  - 📈 Identifies columns to drop (low variance, constant values)
 
 ### LLM-Based Agents (OpenRouter-Based)
 
